@@ -115,8 +115,15 @@ class BDQN(OffPolicyAlgorithm):
         seed: Optional[int] = None,
         device: Union[th.device, str] = "auto",
         use_gamma_function: bool = False,
+        random_prior_beta: float = 0.0,
         _init_setup_model: bool = True,
     ):
+
+        if policy_kwargs is None:
+            policy_kwargs = {}
+        if "random_prior_beta" not in policy_kwargs:
+            # let policy know about the random prior setting
+            policy_kwargs["random_prior_beta"] = random_prior_beta
 
         super().__init__(
             policy,
@@ -139,7 +146,7 @@ class BDQN(OffPolicyAlgorithm):
             create_eval_env=create_eval_env,
             seed=seed,
             sde_support=False,
-            optimize_memory_usage=optimize_memory_usage,
+            optimize_memory_usage=optimize_memory_usage
         )
 
         self.exploration_initial_eps = exploration_initial_eps
@@ -222,7 +229,8 @@ class BDQN(OffPolicyAlgorithm):
 
             with th.no_grad():
                 # Compute the target Q values [B, K, A]
-                q_estimates = self.q_net_target.forward_ensemble(replay_data.next_observations)
+                obs = replay_data.next_observations
+                q_estimates = self.q_net_target.forward_ensemble(obs)
                 # easier to process as [B*K, A]
                 target_q = q_estimates.reshape(B*K, A)
                 # Follow greedy policy: use the one with the highest value
@@ -236,7 +244,6 @@ class BDQN(OffPolicyAlgorithm):
                 if self.use_gamma_function:
                     # Calculate gamma based on uncertainty estimate
                     # we use the estimates for the greedy actions selected above
-
                     ensemble_estimates = q_estimates.reshape([B*K, A])[range(B*K), target_q_indexes] #[B*K]
                     ensemble_estimates = ensemble_estimates.reshape([B, K])
                     variance = th.var(ensemble_estimates, dim=1)  # [B]

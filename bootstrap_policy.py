@@ -2,12 +2,9 @@ from typing import Any, Callable, Dict, List, Optional, Type
 from stable_baselines3.common.policies import BasePolicy, register_policy
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor, FlattenExtractor, NatureCNN, create_mlp
 
-
 import gym
 import torch as th
-
 import torch.nn as nn
-
 
 class MultiQNetwork(BasePolicy):
     """
@@ -19,6 +16,7 @@ class MultiQNetwork(BasePolicy):
     :param activation_fn: Activation function
     :param normalize_images: Whether to normalize images or not,
          dividing by 255.0 (True by default)
+    :param output_scale: Scalar to multiply q_estimate outputs with
     """
 
     def __init__(
@@ -31,6 +29,8 @@ class MultiQNetwork(BasePolicy):
         net_arch: Optional[List[int]] = None,
         activation_fn: Type[nn.Module] = nn.ReLU,
         normalize_images: bool = True,
+        random_net: Optional[nn.Module] = None,
+        output_scale: float = 1.0,
     ):
         super().__init__(
             observation_space,
@@ -48,12 +48,15 @@ class MultiQNetwork(BasePolicy):
         self.features_dim = features_dim
         self.normalize_images = normalize_images
         self.output_heads = output_heads
+        self.random_net = random_net
+        self.output_scale = output_scale
 
         self.selected_agent = 0 # which agent we are currently running
 
         action_dim = self.action_space.n  # number of actions
 
         q_net = create_mlp(self.features_dim, action_dim * output_heads, self.net_arch, self.activation_fn)
+
         self.q_net = nn.Sequential(*q_net)
 
     def forward_ensemble(self, obs: th.Tensor) -> th.Tensor:
@@ -66,8 +69,11 @@ class MultiQNetwork(BasePolicy):
         B = len(obs)
         K = self.output_heads
         A = self.action_space.n
-        output = self.q_net(self.extract_features(obs)).reshape(B, K, A)
-        return output
+        output = self.q_net(self.extract_features(obs))
+        output = output.reshape(B, K, A)
+        if self.random_net is not None:
+            output = output + self.random_net.forward_ensemble(obs)
+        return output * self.output_scale
 
     def forward(self, obs: th.Tensor) -> th.Tensor:
         """
@@ -149,6 +155,7 @@ class BDQNPolicy(BasePolicy):
         normalize_images: bool = True,
         optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
         optimizer_kwargs: Optional[Dict[str, Any]] = None,
+        random_prior_beta: float = 0.0,
     ):
         super().__init__(
             observation_space,
@@ -169,6 +176,7 @@ class BDQNPolicy(BasePolicy):
         self.activation_fn = activation_fn
         self.normalize_images = normalize_images
         self.ensemble_k = ensemble_k
+        self.random_prior_beta = random_prior_beta
 
         self.net_args = {
             "observation_space": self.observation_space,
@@ -181,6 +189,10 @@ class BDQNPolicy(BasePolicy):
         self.q_net, self.q_net_target = None, None
         self._build(lr_schedule)
 
+    @property
+    def use_random_prior(self):
+        return self.random_prior_beta != 0.0
+
     def _build(self, lr_schedule: Callable) -> None:
         """
         Create the network and the optimizer.
@@ -189,8 +201,28 @@ class BDQNPolicy(BasePolicy):
             lr_schedule(1) is the initial learning rate
         """
 
+        if self.use_random_prior:
+
+            class MultiplyLayer(nn.Module):
+                def __init__(self, scalar):
+                    super().__init__()
+                    self.scalar = scalar
+
+                def forward(self, X):
+                    return X * self.scalar
+
+            print(f"Creating random prior network with scale {self.random_prior_beta}")
+            self.random_net = self.make_q_net(output_scale=self.random_prior_beta)
+
+            # make sure we don't train the random net...
+            for param in self.random_net.parameters():
+                param.requires_grad = False
+
+            self.net_args["random_net"] = self.random_net
+
         self.q_net = self.make_q_net()
         self.q_net_target = self.make_q_net()
+
         self.q_net_target.load_state_dict(self.q_net.state_dict())
 
         # Setup optimizer with initial learning rate
@@ -213,12 +245,18 @@ class BDQNPolicy(BasePolicy):
         net_kwargs["output_heads"] = self.ensemble_k
         return net_kwargs
 
-    def make_q_net(self) -> MultiQNetwork:
+    def make_q_net(self, **kwargs) -> MultiQNetwork:
         # Make sure we always have separate networks for features extractors etc
         net_args = self._update_features_extractor(self.net_args, features_extractor=None)
-        return MultiQNetwork(**net_args).to(self.device)
+        return MultiQNetwork(**net_args, **kwargs).to(self.device)
 
     def forward(self, obs: th.Tensor, deterministic: bool = True) -> th.Tensor:
+        """
+        Returns Q value for selected agent (or vote)
+        :param obs:
+        :param deterministic:
+        :return:
+        """
         return self._predict(obs, deterministic=deterministic)
 
     def _predict(self, obs: th.Tensor, deterministic: bool = True) -> th.Tensor:
@@ -273,6 +311,7 @@ class BCnnPolicy(BDQNPolicy):
         normalize_images: bool = True,
         optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
         optimizer_kwargs: Optional[Dict[str, Any]] = None,
+        random_prior_beta: float = 0.0,
     ):
         super().__init__(
             observation_space,
@@ -286,7 +325,24 @@ class BCnnPolicy(BDQNPolicy):
             normalize_images,
             optimizer_class,
             optimizer_kwargs,
+            random_prior_beta=random_prior_beta
         )
+
+
+def clone_and_init_model(model:nn.Module):
+    """
+    Makes a copy of the module with newly initialized parameters
+    :param model:
+    :return:
+    """
+
+    for layer in [module for module in model.modules() if type(module) != nn.Sequential]:
+        print(layer)
+        pass
+
+    # for the moment just clone
+    return model.copy()
+
 
 
 register_policy("BCnnPolicy", BCnnPolicy)
