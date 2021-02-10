@@ -119,12 +119,13 @@ class BDQN(OffPolicyAlgorithm):
         _init_setup_model: bool = True,
     ):
 
+        # pass some args to policy
         if policy_kwargs is None:
             policy_kwargs = {}
-        if "random_prior_beta" not in policy_kwargs:
-            # let policy know about the random prior setting
-            policy_kwargs["random_prior_beta"] = random_prior_beta
-
+        for arg in ["ensemble_k", "random_prior_beta"]:
+            if arg not in policy_kwargs:
+                policy_kwargs[arg] = locals()[arg]
+                
         super().__init__(
             policy,
             env,
