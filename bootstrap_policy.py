@@ -72,7 +72,9 @@ class MultiQNetwork(BasePolicy):
         output = self.q_net(self.extract_features(obs))
         output = output.reshape(B, K, A)
         if self.random_net is not None:
-            output = output + self.random_net.forward_ensemble(obs)
+            with th.no_grad():
+                priors = self.random_net.forward_ensemble(obs)
+            output = priors + output
         return output * self.output_scale
 
     def forward(self, obs: th.Tensor) -> th.Tensor:

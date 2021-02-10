@@ -26,6 +26,16 @@ def make_envs(env_name):
 
     return env, eval_env
 
+def str2bool(v):
+    if isinstance(v, bool):
+       return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Process some integers.')
     parser.add_argument('--run', type=str, default="test", help="run name")
@@ -34,7 +44,7 @@ def parse_args():
     parser.add_argument('--env', type=str, default="Breakout", help="Atari environment")
     parser.add_argument('--epochs', type=float, default=50.0, help="Number of epochs (million steps)")
     parser.add_argument('--buffer_size', type=int, default=int(2e5), help="Replay buffer size")
-    parser.add_argument('--use_gamma', type=bool, default=True)
+    parser.add_argument('--use_gamma', type=str2bool, const=True, nargs='?', default=False)
     parser.add_argument('--k', type=int, default=10)
 
     return parser.parse_args()

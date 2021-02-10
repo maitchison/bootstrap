@@ -125,7 +125,7 @@ class BDQN(OffPolicyAlgorithm):
         for arg in ["ensemble_k", "random_prior_beta"]:
             if arg not in policy_kwargs:
                 policy_kwargs[arg] = locals()[arg]
-                
+
         super().__init__(
             policy,
             env,
@@ -164,6 +164,13 @@ class BDQN(OffPolicyAlgorithm):
         self.current_agent = 0
         self.use_gamma_function = use_gamma_function
         self._last_episode_num = -1
+
+        if self.use_gamma_function:
+            print()
+            print("-"*60)
+            print("Using uncertainty based gamma function.")
+            print("-" * 60)
+            print()
 
         if _init_setup_model:
             self._setup_model()
